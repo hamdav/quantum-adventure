@@ -10,18 +10,23 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(TilemapPlugin)
+           .add_event::<SwitchEvent>()
            .add_system_set(SystemSet::on_enter(AppState::InGame)
                            .with_system(setup))
             .add_system_set(SystemSet::on_update(AppState::InGame)
                             .with_system(helpers::camera::movement)
                             .with_system(helpers::texture::set_texture_filters_to_nearest)
-                            .with_system(mark_tile_and_player))
+                            .with_system(select_positions)
+                            .with_system(switcher)
+                            .with_system(action_system)
+                            .with_system(update_transforms)) //TODO: run in posupdate stage?
+
             .add_system_set(SystemSet::on_exit(AppState::InGame)
                             .with_system(teardown));
     }
 }
 
-#[derive(Component, PartialEq, Eq)]
+#[derive(Component, PartialEq, Eq, Clone, Copy)]
 struct GridPos{
     x: i32, 
     y: i32
@@ -46,15 +51,20 @@ impl PartialEq<GridPos> for TilePos {
 
 #[derive(Component)]
 struct Superposition{
-    phase: f32,
+    phase: f32, //TODO: Make rational not floating point
     magnitude: f32,
 }
 #[derive(Component)]
 struct MainCamera;
 #[derive(Component)]
 struct Blocking;
+#[derive(Component)]
+struct SelectedPos;
 
-
+struct SwitchEvent{
+    gp1: GridPos,
+    gp2: GridPos,
+}
 
 fn setup(mut commands: Commands,
          asset_server: Res<AssetServer>,
@@ -111,13 +121,13 @@ fn setup(mut commands: Commands,
     .insert(GridPos{ x: 0, y: 0 });
 }
 
-fn mark_tile_and_player(mut commands: Commands,
+fn select_positions(mut commands: Commands,
         windows: Res<Windows>,
         asset_server: Res<AssetServer>,
         mouse_button_input: Res<Input<MouseButton>>,
-        superposition_query: Query<&GridPos, With<Superposition>>,
+        selected_tiles: Query<&GridPos, With<SelectedPos>>,
         tile_query: Query<&TilePos, (With<Tile>, Without<Blocking>)>,
-        camera_query: Query<(&Transform, &OrthographicProjection), With<MainCamera>>) {
+        camera_query: Query<(&Transform, &OrthographicProjection), With<MainCamera>>,) {
 
     if mouse_button_input.just_released(MouseButton::Left) {
     
@@ -149,34 +159,64 @@ fn mark_tile_and_player(mut commands: Commands,
             camera_transform.compute_matrix() * p.extend(0.0).extend(1.0)
         } else {return;};
 
-        println!("Click at: {:?}", world_pos);
-
         let grid_pos = world_to_grid_coordinates(&Vec2::new(world_pos.x, world_pos.y));
-        let mut found = false;
+        // Check that there is a tile there that is selectable
+        // Otherwise the square cannot be selected.
+        let mut found_selectable_tile = false;
         for tp in tile_query.iter() {
             if *tp == grid_pos {
                 // There is a non-blocking tile on the position clicked
-                found = true;
+                found_selectable_tile = true;
             }
         }
-        if !found { return; }
+        if !found_selectable_tile { return; }
+
+        // If there are previously selected squares,
+        // the newly selected square must be a neighbour of one of them
+        // and cannot already be selected.
+        if !selected_tiles.is_empty() {
+            // Make true if tile is a neighbour of some selected tile
+            let mut tile_is_neighbour = false;
+            for selected_tile_gridpos in selected_tiles.iter() {
+                // Tile is already selected
+                // TODO: Deselect it?
+                if grid_pos == *selected_tile_gridpos {
+                    return;
+                }
+                if are_neighbours(&grid_pos, selected_tile_gridpos) {
+                    tile_is_neighbour = true;
+                }
+            }
+            if !tile_is_neighbour {
+                return;
+            }
+        }
 
         let world_pos_corner = grid_to_world_coordinates(&grid_pos);
         commands.spawn_bundle(SpriteBundle {
-            texture: asset_server.load("sprites/select.png"),
-            transform: Transform::from_xyz(world_pos_corner.x,
-                                           world_pos_corner.y,
-                                           1.),
-            ..Default::default()
-        });
+                texture: asset_server.load("sprites/select.png"),
+                transform: Transform::from_xyz(world_pos_corner.x,
+                                               world_pos_corner.y,
+                                               1.),
+                ..Default::default()
+            })
+            .insert(SelectedPos)
+            .insert(grid_pos);
 
-        for sp_grid_pos in superposition_query.iter() {
-            // If the clicked grid_pos is the position of the superposition
-            // spawn a marker on that tile
-            if *sp_grid_pos == grid_pos {
-                println!("MATCH");
-            }
+
+    }
+}
+
+fn action_system(keys: Res<Input<KeyCode>>,
+                 selected_tiles: Query<&GridPos, With<SelectedPos>>,
+                 mut switche_writer: EventWriter<SwitchEvent>) {
+    if keys.just_pressed(KeyCode::P) {
+        // Check that only two tiles are selected
+        if selected_tiles.iter().count() != 2 {
+            return;
         }
+        let mut it = selected_tiles.iter();
+        switche_writer.send(SwitchEvent{ gp1: *it.next().unwrap(), gp2: *it.next().unwrap() });
     }
 }
 
@@ -188,6 +228,43 @@ fn grid_to_world_coordinates(gc: &GridPos) -> Vec2 {
     Vec2::new(32. + (gc.x * 64) as f32,
               32. + (gc.y * 64) as f32)
 }
+fn are_neighbours(p1: &GridPos, p2: &GridPos) -> bool {
+    (p1.x - p2.x).abs() <= 1 && (p1.y - p2.y).abs() <= 1
+}
+
+fn switcher(mut commands: Commands,
+            mut switche_reader: EventReader<SwitchEvent>,
+            mut superposition_query: Query<&mut GridPos, With<Superposition>>,
+            selected_query: Query<(Entity, &GridPos), (With<SelectedPos>, Without<Superposition>)>) {
+    // The without superposition is so that bevy knows that the queries are disjoint
+    // since we access the first one mutably
+
+    for switch_event in switche_reader.iter() {
+        // Switch the superpositions
+        for mut gp in superposition_query.iter_mut() {
+            if *gp == switch_event.gp1 {
+                *gp = switch_event.gp2;
+            } else if *gp == switch_event.gp2 {
+                *gp = switch_event.gp1;
+            }
+        }
+        // Clear the selections
+        for (e, gp) in selected_query.iter() {
+            if *gp == switch_event.gp1 || *gp == switch_event.gp2 {
+                commands.entity(e).despawn();
+            }
+        }
+    }
+}
+
+fn update_transforms(mut superposition_query: Query<(&GridPos, &mut Transform), Changed<GridPos>>) {
+    for (gp, mut transform) in superposition_query.iter_mut() {
+        let world_pos = grid_to_world_coordinates(gp);
+        *transform = Transform::from_xyz(world_pos.x, world_pos.y,
+                                        transform.translation.z);
+    }
+}
+
 
 // remove all entities that are not a camera
 fn teardown(mut commands: Commands, entities: Query<Entity, Without<Camera>>) {
