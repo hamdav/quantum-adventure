@@ -21,6 +21,29 @@ impl Plugin for GamePlugin {
     }
 }
 
+#[derive(Component, PartialEq, Eq)]
+struct GridPos{
+    x: i32, 
+    y: i32
+}
+
+impl PartialEq<TilePos> for GridPos {
+    fn eq(&self, other: &TilePos) -> bool {
+        if self.x >= 0 && self.y >= 0 && 
+                self.x as u32 == other.0 &&
+                self.y as u32 == other.1 {
+            true
+        } else {
+            false
+        }
+    }
+}
+impl PartialEq<GridPos> for TilePos {
+    fn eq(&self, other: &GridPos) -> bool {
+        *other == *self
+    }
+}
+
 #[derive(Component)]
 struct Superposition{
     phase: f32,
@@ -84,14 +107,15 @@ fn setup(mut commands: Commands,
         transform: Transform::from_xyz(32., 32., 1.),
         ..Default::default()
     })
-    .insert(Superposition{ phase: 0., magnitude: 1. });
+    .insert(Superposition{ phase: 0., magnitude: 1. })
+    .insert(GridPos{ x: 0, y: 0 });
 }
 
 fn mark_tile_and_player(mut commands: Commands,
         windows: Res<Windows>,
         asset_server: Res<AssetServer>,
         mouse_button_input: Res<Input<MouseButton>>,
-        superposition_query: Query<&Transform, With<Superposition>>,
+        superposition_query: Query<&GridPos, With<Superposition>>,
         tile_query: Query<&TilePos, (With<Tile>, Without<Blocking>)>,
         camera_query: Query<(&Transform, &OrthographicProjection), With<MainCamera>>) {
 
@@ -102,8 +126,6 @@ fn mark_tile_and_player(mut commands: Commands,
 
         // check if the cursor is in the primary window
         let world_pos = if let Some(screen_pos) = wnd.cursor_position() {
-            // TODO: There is an error somewhere in this code, 
-            // it does not work when the camera has zoomed
 
             // get the size of the window
             let size = Vec2::new(wnd.width() as f32, wnd.height() as f32);
@@ -129,17 +151,17 @@ fn mark_tile_and_player(mut commands: Commands,
 
         println!("Click at: {:?}", world_pos);
 
-        let tile_pos = world_to_tile_coordinates(Vec2::new(world_pos.x, world_pos.y));
+        let grid_pos = world_to_grid_coordinates(&Vec2::new(world_pos.x, world_pos.y));
         let mut found = false;
         for tp in tile_query.iter() {
-            if *tp == tile_pos {
+            if *tp == grid_pos {
                 // There is a non-blocking tile on the position clicked
                 found = true;
             }
         }
         if !found { return; }
 
-        let world_pos_corner = tile_to_world_coordinates(tile_pos);
+        let world_pos_corner = grid_to_world_coordinates(&grid_pos);
         commands.spawn_bundle(SpriteBundle {
             texture: asset_server.load("sprites/select.png"),
             transform: Transform::from_xyz(world_pos_corner.x,
@@ -148,29 +170,23 @@ fn mark_tile_and_player(mut commands: Commands,
             ..Default::default()
         });
 
-        // TODO: Rewrite with tilepos instead
-        // Each superposition should contain a tilepos
-        for transform in superposition_query.iter() {
-            // If the sprite contains the cursor, 
+        for sp_grid_pos in superposition_query.iter() {
+            // If the clicked grid_pos is the position of the superposition
             // spawn a marker on that tile
-            if transform.translation.x < world_pos.x 
-                    && world_pos.x < transform.translation.x + 64.
-                    && transform.translation.y < world_pos.y 
-                    && world_pos.y < transform.translation.y + 64. {
-
+            if *sp_grid_pos == grid_pos {
                 println!("MATCH");
             }
         }
     }
 }
 
-fn world_to_tile_coordinates(wc: Vec2) -> TilePos {
-    TilePos((wc.x / 64.).floor() as u32,
-            (wc.y / 64.).floor() as u32)
+fn world_to_grid_coordinates(wc: &Vec2) -> GridPos {
+    GridPos{x: (wc.x / 64.).floor() as i32,
+            y: (wc.y / 64.).floor() as i32}
 }
-fn tile_to_world_coordinates(tc: TilePos) -> Vec2 {
-    Vec2::new(32. + (tc.0 * 64) as f32,
-              32. + (tc.1 * 64) as f32)
+fn grid_to_world_coordinates(gc: &GridPos) -> Vec2 {
+    Vec2::new(32. + (gc.x * 64) as f32,
+              32. + (gc.y * 64) as f32)
 }
 
 // remove all entities that are not a camera
