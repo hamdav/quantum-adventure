@@ -15,6 +15,7 @@ impl Plugin for GamePlugin {
         app.add_plugin(TilemapPlugin)
            .add_event::<SwitchEvent>()
            .add_event::<MixEvent>()
+           .add_event::<ClearSelectionEvent>()
            .add_system_set(SystemSet::on_enter(AppState::InGame)
                            .with_system(setup))
             .add_system_set(SystemSet::on_update(AppState::InGame)
@@ -25,6 +26,7 @@ impl Plugin for GamePlugin {
                             .with_system(mixer)
                             .with_system(action_system)
                             .with_system(update_factors)
+                            .with_system(clear_selection)
                             .with_system(update_transforms)) //TODO: run in posupdate stage?
 
             .add_system_set(SystemSet::on_exit(AppState::InGame)
@@ -78,6 +80,7 @@ struct MixEvent{
     gp1: GridPos,
     gp2: GridPos,
 }
+struct ClearSelectionEvent;
 
 fn setup(mut commands: Commands,
          asset_server: Res<AssetServer>,
@@ -225,7 +228,8 @@ fn select_positions(mut commands: Commands,
 fn action_system(keys: Res<Input<KeyCode>>,
                  selected_tiles: Query<&GridPos, With<SelectedPos>>,
                  mut switche_writer: EventWriter<SwitchEvent>,
-                 mut mixe_writer: EventWriter<MixEvent>) {
+                 mut mixe_writer: EventWriter<MixEvent>,
+                 mut clear_selection_event_writer: EventWriter<ClearSelectionEvent>) {
     if keys.just_pressed(KeyCode::P) {
         // Check that only two tiles are selected
         if selected_tiles.iter().count() != 2 {
@@ -233,6 +237,7 @@ fn action_system(keys: Res<Input<KeyCode>>,
         }
         let mut it = selected_tiles.iter();
         switche_writer.send(SwitchEvent{ gp1: *it.next().unwrap(), gp2: *it.next().unwrap() });
+        clear_selection_event_writer.send(ClearSelectionEvent);
     }
     if keys.just_pressed(KeyCode::O) {
         // Check that only two tiles are selected
@@ -241,7 +246,7 @@ fn action_system(keys: Res<Input<KeyCode>>,
         }
         let mut it = selected_tiles.iter();
         mixe_writer.send(MixEvent{ gp1: *it.next().unwrap(), gp2: *it.next().unwrap() });
-        println!("Mixed sent");
+        clear_selection_event_writer.send(ClearSelectionEvent);
     }
 }
 
@@ -260,8 +265,7 @@ fn are_neighbours(p1: &GridPos, p2: &GridPos) -> bool {
 fn mixer(mut commands: Commands,
          mut asset_server: Res<AssetServer>,
          mut mixe_reader: EventReader<MixEvent>,
-         mut superposition_query: Query<(Entity, &mut GridPos, &mut Superposition)>,
-         selected_query: Query<(Entity, &GridPos), (With<SelectedPos>, Without<Superposition>)>) {
+         mut superposition_query: Query<(Entity, &mut GridPos, &mut Superposition)>,) {
     for mix_event in mixe_reader.iter() {
         let mut sp_a: Option<Mut<Superposition>> = None;
         let mut sp_b: Option<Mut<Superposition>> = None;
@@ -358,8 +362,7 @@ fn spawn_superposition(commands: &mut Commands,
 
 fn switcher(mut commands: Commands,
             mut switche_reader: EventReader<SwitchEvent>,
-            mut superposition_query: Query<&mut GridPos, With<Superposition>>,
-            selected_query: Query<(Entity, &GridPos), (With<SelectedPos>, Without<Superposition>)>) {
+            mut superposition_query: Query<&mut GridPos, With<Superposition>>,) {
     // The without superposition is so that bevy knows that the queries are disjoint
     // since we access the first one mutably
 
@@ -370,12 +373,6 @@ fn switcher(mut commands: Commands,
                 *gp = switch_event.gp2;
             } else if *gp == switch_event.gp2 {
                 *gp = switch_event.gp1;
-            }
-        }
-        // Clear the selections
-        for (e, gp) in selected_query.iter() {
-            if *gp == switch_event.gp1 || *gp == switch_event.gp2 {
-                commands.entity(e).despawn();
             }
         }
     }
@@ -413,6 +410,15 @@ fn update_factors(superposition_query: Query<(&Children, &Superposition), Change
 }
 
 
+fn clear_selection(mut commands: Commands,
+                   selected_query: Query<Entity, With<SelectedPos>>,
+                   mut clear_selection_ev: EventReader<ClearSelectionEvent>) {
+    for _ in clear_selection_ev.iter() {
+        for entity in selected_query.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+}
 // remove all entities that are not a camera
 fn teardown(mut commands: Commands, entities: Query<Entity, Without<Camera>>) {
     for entity in entities.iter() {
