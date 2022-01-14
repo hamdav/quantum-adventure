@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
 
+use num::complex;
+type c32 = complex::Complex32;
+
 use crate::AppState;
 
 use super::helpers;
@@ -11,6 +14,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.add_plugin(TilemapPlugin)
            .add_event::<SwitchEvent>()
+           .add_event::<MixEvent>()
            .add_system_set(SystemSet::on_enter(AppState::InGame)
                            .with_system(setup))
             .add_system_set(SystemSet::on_update(AppState::InGame)
@@ -18,7 +22,9 @@ impl Plugin for GamePlugin {
                             .with_system(helpers::texture::set_texture_filters_to_nearest)
                             .with_system(select_positions)
                             .with_system(switcher)
+                            .with_system(mixer)
                             .with_system(action_system)
+                            .with_system(update_factors)
                             .with_system(update_transforms)) //TODO: run in posupdate stage?
 
             .add_system_set(SystemSet::on_exit(AppState::InGame)
@@ -51,9 +57,12 @@ impl PartialEq<GridPos> for TilePos {
 
 #[derive(Component)]
 struct Superposition{
-    phase: f32, //TODO: Make rational not floating point
-    magnitude: f32,
+    factor: c32
 }
+#[derive(Component)]
+struct PhaseIndicator;
+#[derive(Component)]
+struct MagnitudeIndicator;
 #[derive(Component)]
 struct MainCamera;
 #[derive(Component)]
@@ -62,6 +71,10 @@ struct Blocking;
 struct SelectedPos;
 
 struct SwitchEvent{
+    gp1: GridPos,
+    gp2: GridPos,
+}
+struct MixEvent{
     gp1: GridPos,
     gp2: GridPos,
 }
@@ -112,20 +125,14 @@ fn setup(mut commands: Commands,
         .insert(GlobalTransform::default());
 
     // ====  Spawn Player ======
-    commands.spawn_bundle(SpriteBundle {
-        texture: asset_server.load("sprites/player_front.png"),
-        transform: Transform::from_xyz(32., 32., 1.),
-        ..Default::default()
-    })
-    .insert(Superposition{ phase: 0., magnitude: 1. })
-    .insert(GridPos{ x: 0, y: 0 });
+    spawn_superposition(&mut commands, &asset_server, GridPos{ x:0, y:0 }, c32::new(1., 0.));
 }
 
 fn select_positions(mut commands: Commands,
         windows: Res<Windows>,
         asset_server: Res<AssetServer>,
         mouse_button_input: Res<Input<MouseButton>>,
-        selected_tiles: Query<&GridPos, With<SelectedPos>>,
+        selected_tiles: Query<(Entity, &GridPos), With<SelectedPos>>,
         tile_query: Query<&TilePos, (With<Tile>, Without<Blocking>)>,
         camera_query: Query<(&Transform, &OrthographicProjection), With<MainCamera>>,) {
 
@@ -177,10 +184,14 @@ fn select_positions(mut commands: Commands,
         if !selected_tiles.is_empty() {
             // Make true if tile is a neighbour of some selected tile
             let mut tile_is_neighbour = false;
-            for selected_tile_gridpos in selected_tiles.iter() {
+            for (entity, selected_tile_gridpos) in selected_tiles.iter() {
                 // Tile is already selected
-                // TODO: Deselect it?
+                // TODO: Deselect it in a better way, now the player could
+                // select 1, 2, 3, and the deselct 2 and the selection would no
+                // longer be only neighbours.
                 if grid_pos == *selected_tile_gridpos {
+                    println!("Despawning");
+                    commands.entity(entity).despawn();
                     return;
                 }
                 if are_neighbours(&grid_pos, selected_tile_gridpos) {
@@ -190,6 +201,10 @@ fn select_positions(mut commands: Commands,
             if !tile_is_neighbour {
                 return;
             }
+        }
+        // You cannot have more than two squares selected at once
+        if selected_tiles.iter().count() == 2 {
+            return;
         }
 
         let world_pos_corner = grid_to_world_coordinates(&grid_pos);
@@ -209,7 +224,8 @@ fn select_positions(mut commands: Commands,
 
 fn action_system(keys: Res<Input<KeyCode>>,
                  selected_tiles: Query<&GridPos, With<SelectedPos>>,
-                 mut switche_writer: EventWriter<SwitchEvent>) {
+                 mut switche_writer: EventWriter<SwitchEvent>,
+                 mut mixe_writer: EventWriter<MixEvent>) {
     if keys.just_pressed(KeyCode::P) {
         // Check that only two tiles are selected
         if selected_tiles.iter().count() != 2 {
@@ -217,6 +233,15 @@ fn action_system(keys: Res<Input<KeyCode>>,
         }
         let mut it = selected_tiles.iter();
         switche_writer.send(SwitchEvent{ gp1: *it.next().unwrap(), gp2: *it.next().unwrap() });
+    }
+    if keys.just_pressed(KeyCode::O) {
+        // Check that only two tiles are selected
+        if selected_tiles.iter().count() != 2 {
+            return;
+        }
+        let mut it = selected_tiles.iter();
+        mixe_writer.send(MixEvent{ gp1: *it.next().unwrap(), gp2: *it.next().unwrap() });
+        println!("Mixed sent");
     }
 }
 
@@ -230,6 +255,105 @@ fn grid_to_world_coordinates(gc: &GridPos) -> Vec2 {
 }
 fn are_neighbours(p1: &GridPos, p2: &GridPos) -> bool {
     (p1.x - p2.x).abs() <= 1 && (p1.y - p2.y).abs() <= 1
+}
+
+fn mixer(mut commands: Commands,
+         mut asset_server: Res<AssetServer>,
+         mut mixe_reader: EventReader<MixEvent>,
+         mut superposition_query: Query<(Entity, &mut GridPos, &mut Superposition)>,
+         selected_query: Query<(Entity, &GridPos), (With<SelectedPos>, Without<Superposition>)>) {
+    for mix_event in mixe_reader.iter() {
+        let mut sp_a: Option<Mut<Superposition>> = None;
+        let mut sp_b: Option<Mut<Superposition>> = None;
+        let mut e_a: Option<Entity> = None;
+        let mut e_b: Option<Entity> = None;
+        let mut a_i = c32::new(0., 0.);
+        let mut b_i = c32::new(0., 0.);
+        for (e, gp, sp) in superposition_query.iter_mut() {
+            if *gp == mix_event.gp1 {
+                a_i = sp.factor;
+                sp_a = Some(sp);
+                e_a = Some(e);
+            } else if *gp == mix_event.gp2 {
+                b_i = sp.factor;
+                sp_b = Some(sp);
+                e_b = Some(e);
+            }
+        }
+        let a_f = (a_i - c32::new(0., 1.) * b_i)/2_f32.sqrt();
+        let b_f = (c32::new(0., 1.) * a_i - b_i)/2_f32.sqrt();
+
+        if let Some(mut sp) = sp_a {
+            if a_f == c32::new(0., 0.) {
+                commands.entity(e_a.unwrap()).despawn_recursive();
+            } else {
+                sp.factor = a_f;
+            }
+        } else {
+            // Spawn a new superposition here
+            spawn_superposition(&mut commands, &asset_server, mix_event.gp1, a_f);
+        }
+        if let Some(mut sp) = sp_b {
+            if b_f == c32::new(0., 0.) {
+                commands.entity(e_b.unwrap()).despawn_recursive();
+            } else {
+                sp.factor = b_f;
+            }
+        } else {
+            // Spawn a new superposition here
+            spawn_superposition(&mut commands, &asset_server, mix_event.gp2, b_f);
+        }
+    }
+}
+
+fn spawn_superposition(commands: &mut Commands,
+                       asset_server: &Res<AssetServer>,
+                       gp: GridPos,
+                       factor: c32) {
+
+    // Position in world coordinates
+    let world_pos = grid_to_world_coordinates(&gp);
+    // Barlength
+    let bar_length = (factor.norm_sqr() * 46.).ceil();
+
+    commands.spawn_bundle(SpriteBundle {
+        texture: asset_server.load("sprites/player_front.png"),
+        transform: Transform::from_xyz(world_pos.x, world_pos.y, 1.),
+        ..Default::default()
+    })
+    .insert(Superposition{ factor })
+    .insert(gp)
+    .with_children(|parent| {
+        // Spawn bar background
+        parent.spawn_bundle(SpriteBundle{
+            texture: asset_server.load("sprites/bar.png"),
+            transform: Transform::from_xyz(0., 0., 1.),
+            ..Default::default()
+        });
+        // Spawn bar
+        parent.spawn_bundle(SpriteBundle{
+                sprite: Sprite {
+                    color: Color::rgb(0.7, 0.0, 0.0),
+                    custom_size: Some(Vec2::new(bar_length, 4.)),
+                    ..Default::default()
+                },
+                // -32 because it starts from the middle of the tile
+                // + 23/2 because the anchor is in the middle of the bar
+                // + 9 because the bar should be 9 pixels left of the boundry
+                transform: Transform::from_xyz(bar_length/2. - 32. + 9., 
+                                               4./2. - 32. + 5., 2.),
+                ..Default::default()
+        })
+        .insert(MagnitudeIndicator);
+        // Spawn arrow
+        parent.spawn_bundle(SpriteBundle{
+                texture: asset_server.load("sprites/arrow.png"),
+                transform: Transform::from_xyz(0., 18., 2.)
+                    .with_rotation(Quat::from_rotation_z(factor.arg())),
+                ..Default::default()
+        })
+        .insert(PhaseIndicator);
+    });
 }
 
 fn switcher(mut commands: Commands,
@@ -262,6 +386,29 @@ fn update_transforms(mut superposition_query: Query<(&GridPos, &mut Transform), 
         let world_pos = grid_to_world_coordinates(gp);
         *transform = Transform::from_xyz(world_pos.x, world_pos.y,
                                         transform.translation.z);
+    }
+}
+
+fn update_factors(superposition_query: Query<(&Children, &Superposition), Changed<Superposition>>,
+                  mut phase_ind_q: Query<&mut Transform, (With<PhaseIndicator>, Without<MagnitudeIndicator>)>,
+                  mut magn_ind_q: Query<(&mut Transform, &mut Sprite), With<MagnitudeIndicator>>,) {
+    for (children, sp) in superposition_query.iter() {
+        for &child in children.iter() {
+            if let Ok(mut arrow_transform) = phase_ind_q.get_mut(child) {
+                *arrow_transform = Transform{
+                    translation: arrow_transform.translation,
+                    rotation: Quat::from_rotation_z(sp.factor.arg()),
+                    scale: arrow_transform.scale
+                };
+            }
+            // Barlength
+            let bar_length = (sp.factor.norm_sqr() * 46.).ceil();
+            if let Ok((mut bar_transform, mut bar_sprite)) = magn_ind_q.get_mut(child) {
+                *bar_transform = Transform::from_xyz(bar_length/2. - 32. + 9., 
+                    4./2. - 32. + 5., 2.);
+                bar_sprite.custom_size = Some(Vec2::new(bar_length, 4.));
+            }
+        }
     }
 }
 
