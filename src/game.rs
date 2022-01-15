@@ -263,7 +263,7 @@ fn are_neighbours(p1: &GridPos, p2: &GridPos) -> bool {
 }
 
 fn mixer(mut commands: Commands,
-         mut asset_server: Res<AssetServer>,
+         asset_server: Res<AssetServer>,
          mut mixe_reader: EventReader<MixEvent>,
          mut superposition_query: Query<(Entity, &mut GridPos, &mut Superposition)>,) {
     for mix_event in mixe_reader.iter() {
@@ -284,11 +284,12 @@ fn mixer(mut commands: Commands,
                 e_b = Some(e);
             }
         }
-        let a_f = (a_i - c32::new(0., 1.) * b_i)/2_f32.sqrt();
-        let b_f = (c32::new(0., 1.) * a_i - b_i)/2_f32.sqrt();
+        let a_f = (a_i - b_i)/2_f32.sqrt();
+        let b_f = (a_i + b_i)/2_f32.sqrt();
+        println!("a_f: {}, b_f: {}", a_f, b_f);
 
         if let Some(mut sp) = sp_a {
-            if a_f == c32::new(0., 0.) {
+            if a_f.norm_sqr() <= 1e-12 {
                 commands.entity(e_a.unwrap()).despawn_recursive();
             } else {
                 sp.factor = a_f;
@@ -298,7 +299,7 @@ fn mixer(mut commands: Commands,
             spawn_superposition(&mut commands, &asset_server, mix_event.gp1, a_f);
         }
         if let Some(mut sp) = sp_b {
-            if b_f == c32::new(0., 0.) {
+            if b_f.norm_sqr() <= 1e-12 {
                 commands.entity(e_b.unwrap()).despawn_recursive();
             } else {
                 sp.factor = b_f;
@@ -318,7 +319,7 @@ fn spawn_superposition(commands: &mut Commands,
     // Position in world coordinates
     let world_pos = grid_to_world_coordinates(&gp);
     // Barlength
-    let bar_length = (factor.norm_sqr() * 46.).ceil();
+    let bar_length = (factor.norm() * 46.).ceil();
 
     commands.spawn_bundle(SpriteBundle {
         texture: asset_server.load("sprites/player_front.png"),
@@ -399,7 +400,7 @@ fn update_factors(superposition_query: Query<(&Children, &Superposition), Change
                 };
             }
             // Barlength
-            let bar_length = (sp.factor.norm_sqr() * 46.).ceil();
+            let bar_length = (sp.factor.norm() * 46.).ceil();
             if let Ok((mut bar_transform, mut bar_sprite)) = magn_ind_q.get_mut(child) {
                 *bar_transform = Transform::from_xyz(bar_length/2. - 32. + 9., 
                     4./2. - 32. + 5., 2.);
