@@ -3,7 +3,6 @@ use bevy::window::WindowMode;
 
 mod menu;
 mod game;
-mod helpers;
 
 fn main() {
     App::new()
