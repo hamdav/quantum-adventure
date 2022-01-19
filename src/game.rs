@@ -4,6 +4,7 @@ mod operations;
 mod camera;
 mod texture;
 mod coords;
+mod measurer;
 
 // Imports
 use std::collections::HashMap;
@@ -94,17 +95,18 @@ fn setup(mut commands: Commands,
         .insert(GlobalTransform::default());
 
     // ====  Spawn Player ======
-    //player::spawn_superposition(&mut commands, &asset_server, GridPos::new(0, 0), c32::new(1., 0.));
 
-    // TODO: Wierd shit is happending because superpositions are children
-    // to player and player does not have a transform => they
-    // cant have a relative transform => they all get 0
     let mut map = HashMap::new();
     map.insert(GridPos::new(0, 0), c32::new(1., 0.));
     player::spawn_player(&mut commands, &asset_server, QState{map});
 
     // ==== Spawn measure ====
-    //
+
+    let mut map = HashMap::new();
+    map.insert(GridPos::new(3, 3), c32::new(1./2_f32.sqrt(), 0.));
+    map.insert(GridPos::new(5, 3), c32::new(1./2_f32.sqrt(), 0.));
+    measurer::spawn_measurement_device(
+        &mut commands, &asset_server, QState{map});
 }
 
 
