@@ -1,9 +1,12 @@
+use rand;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
 use num::complex;
 use super::player::*;
 use super::coords::*;
+use super::measurer::*;
 
+#[allow(non_camel_case_types)]
 type c32 = complex::Complex32;
 
 /*
@@ -22,9 +25,13 @@ pub struct SwitchEvent{
     gp2: GridPos,
 }
 pub struct MixEvent{
-gp1: GridPos,
-gp2: GridPos,
+    gp1: GridPos,
+    gp2: GridPos,
 }
+pub struct MeasureEvent{
+    entity: Entity,
+}
+
 pub struct ClearSelectionEvent;
 
 /*
@@ -93,6 +100,29 @@ pub fn mixer(
         } else {
             // Replaces value if already there and creates new if not
             state.map.insert(mix_event.gp2, b_f);
+        }
+    }
+}
+
+pub fn measure(
+    mut measurement_event_reader: EventReader<MeasureEvent>,
+    measurement_state_query: Query<&QState, With<MeasurementDevice>>,
+    mut player_state_query: Query<&mut QState, (With<Player>, Without<MeasurementDevice>)>,
+    ) {
+
+    for meas_event in measurement_event_reader.iter() {
+        let success_state = measurement_state_query.get(meas_event.entity)
+            .unwrap();
+        let mut player_state = player_state_query.single_mut();
+        let scal_prod = player_state.scal_prod(success_state);
+        println!("Prob of success = {}", scal_prod.norm_sqr());
+        //TODO: Fix phase in success case
+        if rand::random::<f32>() < scal_prod.norm_sqr() {
+            *player_state = (*success_state).clone();
+        } else {
+            *player_state = ((*player_state).clone()
+                - scal_prod.conj() * (*success_state).clone() )
+                / (1. - scal_prod.norm_sqr()).sqrt()
         }
     }
 }
@@ -182,7 +212,7 @@ pub fn select_positions(mut commands: Commands,
                 texture: asset_server.load("sprites/select.png"),
                 transform: Transform::from_xyz(world_pos_corner.x,
                                                world_pos_corner.y,
-                                               1.),
+                                               20.),
                 ..Default::default()
             })
             .insert(SelectedPos)
@@ -193,8 +223,10 @@ pub fn select_positions(mut commands: Commands,
 }
 pub fn action_system(keys: Res<Input<KeyCode>>,
     selected_tiles: Query<&GridPos, With<SelectedPos>>,
+    measurement_devices: Query<(Entity, &QState), With<MeasurementDevice>>,
     mut switche_writer: EventWriter<SwitchEvent>,
     mut mixe_writer: EventWriter<MixEvent>,
+    mut mease_writer: EventWriter<MeasureEvent>,
     mut clear_selection_event_writer: EventWriter<ClearSelectionEvent>
     ) {
     if keys.just_pressed(KeyCode::P) {
@@ -215,7 +247,18 @@ pub fn action_system(keys: Res<Input<KeyCode>>,
         mixe_writer.send(MixEvent{ gp1: *it.next().unwrap(), gp2: *it.next().unwrap() });
         clear_selection_event_writer.send(ClearSelectionEvent);
     }
+    if keys.just_pressed(KeyCode::I) {
+        if let Ok(gp) = selected_tiles.get_single() {
+            for (entity, state) in measurement_devices.iter() {
+                if state.map.contains_key(gp) {
+                    mease_writer.send(MeasureEvent{ entity });
+                }
+            }
+            clear_selection_event_writer.send(ClearSelectionEvent);
+        }
+    }
 }
+
 pub fn clear_selection(mut commands: Commands,
     selected_query: Query<Entity, With<SelectedPos>>,
     mut clear_selection_ev: EventReader<ClearSelectionEvent>

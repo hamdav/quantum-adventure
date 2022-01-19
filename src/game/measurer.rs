@@ -3,10 +3,13 @@ use bevy::prelude::*;
 use super::player::*;
 use super::coords::*;
 use num::complex;
+#[allow(non_camel_case_types)]
 type c32 = complex::Complex32;
 
 #[derive(Component)]
 pub struct MeasurementDevice;
+#[derive(Component)]
+pub struct MeasurementIndicator;
 
 pub fn spawn_measurement_device(
     commands: &mut Commands,
@@ -55,6 +58,7 @@ pub fn spawn_measurement_indicator(
         transform: Transform::from_xyz(world_pos.x, world_pos.y, 1.),
         ..Default::default()
     })
+    .insert(MeasurementIndicator)
     .insert(Superposition{ factor })
     .insert(gp)
     .with_children(|parent| {

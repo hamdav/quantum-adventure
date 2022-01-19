@@ -1,10 +1,12 @@
 use std::collections::HashMap;
+use std::ops::{Add, Sub, Mul, Div};
 use bevy::prelude::*;
 use num::complex;
 use super::coords::*;
+#[allow(non_camel_case_types)]
 type c32 = complex::Complex32;
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 pub struct QState {
     pub map: HashMap<GridPos, c32>,
 }
@@ -18,6 +20,82 @@ pub struct Superposition{
 pub struct PhaseIndicator;
 #[derive(Component)]
 pub struct MagnitudeIndicator;
+
+impl Add for QState {
+    type Output = Self;
+
+    fn add(mut self, other: Self) -> Self {
+        for (o_key, o_val) in other.map.iter() {
+            if let Some(s_val) = self.map.get_mut(&o_key) {
+                *s_val += o_val;
+            } else {
+                self.map.insert(*o_key, *o_val);
+            }
+        }
+        self
+    }
+}
+impl Sub for QState {
+    type Output = Self;
+
+    fn sub(mut self, other: Self) -> Self {
+        for (o_key, o_val) in other.map.iter() {
+            if let Some(s_val) = self.map.get_mut(&o_key) {
+                *s_val -= o_val;
+            } else {
+                self.map.insert(*o_key, -*o_val);
+            }
+        }
+        self
+    }
+}
+
+impl Mul<c32> for QState {
+    type Output = Self;
+
+    fn mul(mut self, rhs: c32) -> Self {
+        for val in self.map.values_mut() {
+            *val = *val * rhs;
+        }
+        self
+    }
+}
+impl Mul<QState> for c32 {
+    type Output = QState;
+
+    fn mul(self, mut rhs: QState) -> QState {
+        for val in rhs.map.values_mut() {
+            *val = *val * self;
+        }
+        rhs
+    }
+}
+
+impl Div<f32> for QState {
+    type Output = Self;
+
+    fn div(mut self, rhs: f32) -> Self {
+        for val in self.map.values_mut() {
+            *val = *val / rhs;
+        }
+        self
+    }
+}
+
+impl QState {
+    pub fn scal_prod(&self, other: &Self) -> c32 {
+        /*
+         * Scalar product with complex conjugation
+         */
+        let mut rv = c32::new(0., 0.);
+        for (s_key, s_val) in self.map.iter() {
+            if let Some(o_val) = other.map.get(s_key) {
+                rv += s_val.conj() * o_val;
+            }
+        }
+        rv
+    }
+}
 
 pub fn spawn_player(
     commands: &mut Commands,
@@ -41,7 +119,7 @@ pub fn spawn_player(
         // *have* to be relative to their parent transforms,
         // and thus the parents *have* to have a transform.
         // See https://github.com/bevyengine/bevy/issues/2730
-        .insert(Transform::identity())
+        .insert(Transform::from_xyz(0., 0., 10.))
         .insert(GlobalTransform::identity())
         .push_children(&children);
 }

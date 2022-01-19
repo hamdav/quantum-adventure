@@ -15,6 +15,7 @@ use crate::AppState;
 use coords::*;
 use player::QState;
 
+#[allow(non_camel_case_types)]
 type c32 = complex::Complex32;
 
 pub struct GamePlugin;
@@ -24,6 +25,7 @@ impl Plugin for GamePlugin {
         app.add_plugin(TilemapPlugin)
            .add_event::<operations::SwitchEvent>()
            .add_event::<operations::MixEvent>()
+           .add_event::<operations::MeasureEvent>()
            .add_event::<operations::ClearSelectionEvent>()
            .add_system_set(SystemSet::on_enter(AppState::InGame)
                            .with_system(setup))
@@ -33,6 +35,7 @@ impl Plugin for GamePlugin {
                             .with_system(operations::select_positions)
                             .with_system(operations::switcher)
                             .with_system(operations::mixer)
+                            .with_system(operations::measure)
                             .with_system(operations::action_system)
                             .with_system(player::update_superpositions)
                             .with_system(player::update_superposition_indicators)
@@ -103,8 +106,8 @@ fn setup(mut commands: Commands,
     // ==== Spawn measure ====
 
     let mut map = HashMap::new();
-    map.insert(GridPos::new(3, 3), c32::new(1./2_f32.sqrt(), 0.));
-    map.insert(GridPos::new(5, 3), c32::new(1./2_f32.sqrt(), 0.));
+    map.insert(GridPos::new(1, 0), c32::new(1./2_f32.sqrt(), 0.));
+    map.insert(GridPos::new(2, 0), c32::new(1./2_f32.sqrt(), 0.));
     measurer::spawn_measurement_device(
         &mut commands, &asset_server, QState{map});
 }
