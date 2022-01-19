@@ -116,9 +116,8 @@ pub fn measure(
         let mut player_state = player_state_query.single_mut();
         let scal_prod = player_state.scal_prod(success_state);
         println!("Prob of success = {}", scal_prod.norm_sqr());
-        //TODO: Fix phase in success case
         if rand::random::<f32>() < scal_prod.norm_sqr() {
-            *player_state = (*success_state).clone();
+            *player_state = (*success_state).clone() * scal_prod.conj() / scal_prod.norm();
         } else {
             *player_state = ((*player_state).clone()
                 - scal_prod.conj() * (*success_state).clone() )
