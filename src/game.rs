@@ -6,11 +6,13 @@ mod texture;
 mod coords;
 
 // Imports
+use std::collections::HashMap;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
 use num::complex;
 use crate::AppState;
 use coords::*;
+use player::QState;
 
 type c32 = complex::Complex32;
 
@@ -31,6 +33,7 @@ impl Plugin for GamePlugin {
                             .with_system(operations::switcher)
                             .with_system(operations::mixer)
                             .with_system(operations::action_system)
+                            .with_system(player::update_superpositions)
                             .with_system(player::update_superposition_indicators)
                             .with_system(operations::clear_selection)
                             .with_system(update_transforms)) //TODO: run in posupdate stage?
@@ -91,7 +94,17 @@ fn setup(mut commands: Commands,
         .insert(GlobalTransform::default());
 
     // ====  Spawn Player ======
-    player::spawn_superposition(&mut commands, &asset_server, GridPos::new(0, 0), c32::new(1., 0.));
+    //player::spawn_superposition(&mut commands, &asset_server, GridPos::new(0, 0), c32::new(1., 0.));
+
+    // TODO: Wierd shit is happending because superpositions are children
+    // to player and player does not have a transform => they
+    // cant have a relative transform => they all get 0
+    let mut map = HashMap::new();
+    map.insert(GridPos::new(0, 0), c32::new(1., 0.));
+    player::spawn_player(&mut commands, &asset_server, QState{map});
+
+    // ==== Spawn measure ====
+    //
 }
 
 

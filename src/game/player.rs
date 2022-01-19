@@ -1,8 +1,15 @@
+use std::collections::HashMap;
 use bevy::prelude::*;
 use num::complex;
 use super::coords::*;
 type c32 = complex::Complex32;
 
+#[derive(Component)]
+pub struct QState {
+    pub map: HashMap<GridPos, c32>,
+}
+#[derive(Component)]
+pub struct Player;
 #[derive(Component)]
 pub struct Superposition{
     pub factor: c32
@@ -12,14 +19,42 @@ pub struct PhaseIndicator;
 #[derive(Component)]
 pub struct MagnitudeIndicator;
 
+pub fn spawn_player(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    state: QState,
+    ) {
+
+    // Spawn children
+    let children: Vec<Entity> = state.map
+        .iter()
+        .map(|(gp, factor)| spawn_superposition(
+            commands, asset_server, *gp, *factor))
+        .collect();
+
+    // Spawn player entity
+    commands.spawn()
+        .insert(state)
+        .insert(Player)
+        // The transform and global transform are unused in this
+        // case but they are needed because child transforms
+        // *have* to be relative to their parent transforms,
+        // and thus the parents *have* to have a transform.
+        // See https://github.com/bevyengine/bevy/issues/2730
+        .insert(Transform::identity())
+        .insert(GlobalTransform::identity())
+        .push_children(&children);
+}
+
 pub fn spawn_superposition(commands: &mut Commands,
     asset_server: &Res<AssetServer>,
     gp: GridPos,
     factor: c32
-    ) {
+    ) -> Entity {
     /* 
      * Spawns a new superposition at gp
      */
+    println!("Spawning: ");
 
     // Position in world coordinates
     let world_pos = grid_to_world_coordinates(&gp);
@@ -63,7 +98,65 @@ pub fn spawn_superposition(commands: &mut Commands,
                 ..Default::default()
         })
         .insert(PhaseIndicator);
-    });
+    }).id()
+}
+
+pub fn update_superpositions(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    player_query: Query<(Entity, &QState, &Children), (Changed<QState>, With<Player>)>,
+    mut superposition_query: Query<(&GridPos, &mut Superposition)>
+    ){
+    /*
+     * Update the factors in the superposition entities
+     * whenever the state changes
+     */
+    
+    for (entity, state, children) in player_query.iter() {
+        println!("QState: {:?}", state.map);
+        // Loop through children, despawn any that aren't in state
+        // and make sure the factors match in those that are
+        for child in children.iter() {
+            let (child_gp, mut child_sp) = 
+                superposition_query.get_mut(*child).unwrap();
+
+            println!("{:?}", state.map.get(child_gp));
+            if let Some(factor) = state.map.get(child_gp) {
+                if child_sp.factor != *factor {
+                    child_sp.factor = *factor;
+                }
+            } else {
+                // Superposition is no longer part of the state and should
+                // be despawned. I think this removes it from the parent
+                // children list aswell.
+                println!("Despawning");
+                commands.entity(*child).despawn_recursive();
+            }
+        }
+        // Loop through state to see which entries do not have an
+        // associated child and spawn one from them
+        for (gp, factor) in state.map.iter() {
+            let mut found_child = false;
+
+            for child in children.iter() {
+                let (child_gp, _child_sp) = 
+                    superposition_query.get_mut(*child).unwrap();
+                if *child_gp == *gp {
+                    found_child = true;
+                    break;
+                }
+            }
+            
+            if !found_child {
+                let id = spawn_superposition(&mut commands,
+                                             &asset_server,
+                                             *gp,
+                                             *factor);
+                commands.entity(entity)
+                    .add_child(id);
+            }
+        }
+    }
 }
 
 pub fn update_superposition_indicators(

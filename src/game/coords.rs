@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use bevy_ecs_tilemap::TilePos;
 
-#[derive(Component, PartialEq, Eq, Clone, Copy)]
+#[derive(Component, PartialEq, Eq, Clone, Copy, Hash, Debug)]
 pub struct GridPos{
     x: i32, 
     y: i32

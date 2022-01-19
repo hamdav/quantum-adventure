@@ -31,71 +31,68 @@ pub struct ClearSelectionEvent;
 * Systems
 */
 pub fn switcher(mut switche_reader: EventReader<SwitchEvent>,
-mut superposition_query: Query<&mut GridPos, With<Superposition>>,
-) {
+    mut player_state_query: Query<&mut QState, With<Player>>,
+    ) {
     // The without superposition is so that bevy knows that the queries 
     // are disjoint since we access the first one mutably
 
     for switch_event in switche_reader.iter() {
         // Switch the superpositions
-        for mut gp in superposition_query.iter_mut() {
-            if *gp == switch_event.gp1 {
-                *gp = switch_event.gp2;
-            } else if *gp == switch_event.gp2 {
-                *gp = switch_event.gp1;
-            }
+        let mut state = player_state_query.single_mut();
+
+        let a_i = *state.map.get(&switch_event.gp1)
+            .unwrap_or(&c32::new(0., 0.));
+        let b_i = *state.map.get(&switch_event.gp2)
+            .unwrap_or(&c32::new(0., 0.));
+        let a_f = b_i;
+        let b_f = a_i;
+
+        if a_f == c32::new(0., 0.) {
+            // Removes value if there, does nothing if not
+            state.map.remove(&switch_event.gp1);
+        } else {
+            // Replaces value if already there and creates new if not
+            state.map.insert(switch_event.gp1, a_f);
+        }
+        if b_f == c32::new(0., 0.) {
+            // Removes value if there, does nothing if not
+            state.map.remove(&switch_event.gp2);
+        } else {
+            // Replaces value if already there and creates new if not
+            state.map.insert(switch_event.gp2, b_f);
         }
     }
 }
 
-pub fn mixer(mut commands: Commands,
-    asset_server: Res<AssetServer>,
+pub fn mixer(
     mut mixe_reader: EventReader<MixEvent>,
-    mut superposition_query: Query<(Entity, &mut GridPos, &mut Superposition)>,
+    mut player_state_query: Query<&mut QState, With<Player>>,
     ) {
     for mix_event in mixe_reader.iter() {
-        let mut sp_a: Option<Mut<Superposition>> = None;
-        let mut sp_b: Option<Mut<Superposition>> = None;
-        let mut e_a: Option<Entity> = None;
-        let mut e_b: Option<Entity> = None;
-        let mut a_i = c32::new(0., 0.);
-        let mut b_i = c32::new(0., 0.);
-        for (e, gp, sp) in superposition_query.iter_mut() {
-            if *gp == mix_event.gp1 {
-                a_i = sp.factor;
-                sp_a = Some(sp);
-                e_a = Some(e);
-            } else if *gp == mix_event.gp2 {
-                b_i = sp.factor;
-                sp_b = Some(sp);
-                e_b = Some(e);
-            }
-        }
+
+        let mut state = player_state_query.single_mut();
+
+        let a_i = *state.map.get(&mix_event.gp1)
+            .unwrap_or(&c32::new(0., 0.));
+        let b_i = *state.map.get(&mix_event.gp2)
+            .unwrap_or(&c32::new(0., 0.));
         let a_f = (a_i - b_i)/2_f32.sqrt();
         let b_f = (a_i + b_i)/2_f32.sqrt();
         println!("a_f: {}, b_f: {}", a_f, b_f);
 
-        // TODO: If there is no superposition to begin with,
-        // do nothing
-        if let Some(mut sp) = sp_a {
-            if a_f.norm_sqr() <= 1e-12 {
-                commands.entity(e_a.unwrap()).despawn_recursive();
-            } else {
-                sp.factor = a_f;
-            }
+        if a_f == c32::new(0., 0.) {
+            // Removes value if there, does nothing if not
+            state.map.remove(&mix_event.gp1);
         } else {
-            // Spawn a new superposition here
-            spawn_superposition(&mut commands, &asset_server, mix_event.gp1, a_f);
+            // Replaces value if already there and creates new if not
+            state.map.insert(mix_event.gp1, a_f);
         }
-        if let Some(mut sp) = sp_b {
-            if b_f.norm_sqr() <= 1e-12 {
-                commands.entity(e_b.unwrap()).despawn_recursive();
-            } else {
-                sp.factor = b_f;
-            }
+        if b_f == c32::new(0., 0.) {
+            // Removes value if there, does nothing if not
+            state.map.remove(&mix_event.gp2);
         } else {
-            // Spawn a new superposition here
-            spawn_superposition(&mut commands, &asset_server, mix_event.gp2, b_f);
+            // Replaces value if already there and creates new if not
+            state.map.insert(mix_event.gp2, b_f);
         }
     }
 }
