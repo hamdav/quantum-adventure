@@ -3,6 +3,7 @@ use std::ops::{Add, Sub, Mul, Div};
 use bevy::prelude::*;
 use num::complex;
 use super::coords::*;
+use super::measurer::MeasurementIndicator;
 #[allow(non_camel_case_types)]
 type c32 = complex::Complex32;
 
@@ -138,10 +139,19 @@ pub fn spawn_superposition(commands: &mut Commands,
     let world_pos = grid_to_world_coordinates(&gp);
     // Barlength
     let bar_length = (factor.norm() * 46.).ceil();
+    let color = if factor.norm_sqr() >= 1. {
+            Color::rgba(1., 1., 1., 1.)
+        } else { 
+            Color::rgba(1., 1., 1., 0.707) 
+        };
 
     commands.spawn_bundle(SpriteBundle {
         texture: asset_server.load("sprites/player_front.png"),
         transform: Transform::from_xyz(world_pos.x, world_pos.y, 1.),
+        sprite: Sprite{
+            color,
+            ..Default::default()
+        },
         ..Default::default()
     })
     .insert(Superposition{ factor })
@@ -238,19 +248,29 @@ pub fn update_superpositions(
 }
 
 pub fn update_superposition_indicators(
-    superposition_query: Query<(&Children, &Superposition),
-        Changed<Superposition>>,
+    mut superposition_query: Query<(&Children, &mut Sprite, &Superposition),
+        (Changed<Superposition>, Without<MeasurementIndicator>)>,
     mut phase_ind_q: Query<&mut Transform,
         (With<PhaseIndicator>, Without<MagnitudeIndicator>)>,
     mut magn_ind_q: Query<(&mut Transform, &mut Sprite),
-        With<MagnitudeIndicator>>,
+        (With<MagnitudeIndicator>, Without<Superposition>)>,
     ) {
     /*
      * Update the phase and magnitude indicators on superpositions
+     * and also the transparency
      */
 
-    for (children, sp) in superposition_query.iter() {
+    for (children, mut sprite, sp) in superposition_query.iter_mut() {
         for &child in children.iter() {
+
+            // Transparency
+            if sp.factor.norm_sqr() >= 1. {
+                sprite.color = Color::rgba(1., 1., 1., 1.);
+            } else {
+                sprite.color = Color::rgba(1., 1., 1., 0.707);
+            }
+
+            // Arrow direction
             if let Ok(mut arrow_transform) = phase_ind_q.get_mut(child) {
                 *arrow_transform = Transform{
                     translation: arrow_transform.translation,

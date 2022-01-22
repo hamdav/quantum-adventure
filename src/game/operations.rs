@@ -31,6 +31,9 @@ pub struct MixEvent{
 pub struct MeasureEvent{
     entity: Entity,
 }
+pub struct MeasureSuccessEvent{
+    pub entity: Entity,
+}
 
 pub struct ClearSelectionEvent;
 
@@ -106,6 +109,7 @@ pub fn mixer(
 
 pub fn measure(
     mut measurement_event_reader: EventReader<MeasureEvent>,
+    mut success_event_writer: EventWriter<MeasureSuccessEvent>,
     measurement_state_query: Query<&QState, With<MeasurementDevice>>,
     mut player_state_query: Query<&mut QState, (With<Player>, Without<MeasurementDevice>)>,
     ) {
@@ -118,6 +122,7 @@ pub fn measure(
         println!("Prob of success = {}", scal_prod.norm_sqr());
         if rand::random::<f32>() < scal_prod.norm_sqr() {
             *player_state = (*success_state).clone() * scal_prod.conj() / scal_prod.norm();
+            success_event_writer.send(MeasureSuccessEvent{ entity: meas_event.entity });
         } else {
             *player_state = ((*player_state).clone()
                 - scal_prod.conj() * (*success_state).clone() )
@@ -132,6 +137,7 @@ pub fn select_positions(mut commands: Commands,
     mouse_button_input: Res<Input<MouseButton>>,
     selected_tiles: Query<(Entity, &GridPos), With<SelectedPos>>,
     tile_query: Query<&TilePos, (With<Tile>, Without<Blocking>)>,
+    blocking_query: Query<&GridPos, With<Blocking>>,
     camera_query: Query<(&Transform, &OrthographicProjection)>,
     ) {
 
@@ -173,6 +179,12 @@ pub fn select_positions(mut commands: Commands,
             if *tp == grid_pos {
                 // There is a non-blocking tile on the position clicked
                 found_selectable_tile = true;
+            }
+        }
+        for gp in blocking_query.iter() {
+            if *gp == grid_pos {
+                // There is some blocking element on top of the tile
+                found_selectable_tile = false;
             }
         }
         if !found_selectable_tile { return; }

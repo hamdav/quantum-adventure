@@ -15,7 +15,7 @@ pub fn spawn_measurement_device(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
     state: QState,
-    ) {
+    ) -> Entity {
     /*
      * Spawn a new measurement device
      */
@@ -38,7 +38,8 @@ pub fn spawn_measurement_device(
         // See https://github.com/bevyengine/bevy/issues/2730
         .insert(Transform::identity())
         .insert(GlobalTransform::identity())
-        .push_children(&children);
+        .push_children(&children)
+        .id()
 }
 pub fn spawn_measurement_indicator(
     commands: &mut Commands,

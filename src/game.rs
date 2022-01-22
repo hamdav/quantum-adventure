@@ -5,6 +5,7 @@ mod camera;
 mod texture;
 mod coords;
 mod measurer;
+mod doors;
 
 // Imports
 use std::collections::HashMap;
@@ -26,6 +27,7 @@ impl Plugin for GamePlugin {
            .add_event::<operations::SwitchEvent>()
            .add_event::<operations::MixEvent>()
            .add_event::<operations::MeasureEvent>()
+           .add_event::<operations::MeasureSuccessEvent>()
            .add_event::<operations::ClearSelectionEvent>()
            .add_system_set(SystemSet::on_enter(AppState::InGame)
                            .with_system(setup))
@@ -37,6 +39,8 @@ impl Plugin for GamePlugin {
                             .with_system(operations::mixer)
                             .with_system(operations::measure)
                             .with_system(operations::action_system)
+                            .with_system(doors::door_opening_system)
+                            .with_system(doors::sprite_animation)
                             .with_system(player::update_superpositions)
                             .with_system(player::update_superposition_indicators)
                             .with_system(operations::clear_selection)
@@ -54,6 +58,7 @@ struct MainCamera;
 
 fn setup(mut commands: Commands,
          asset_server: Res<AssetServer>,
+         mut texture_atlases: ResMut<Assets<TextureAtlas>>,
          mut map_query: MapQuery) {
     // Spawn the camera
     commands.spawn_bundle(OrthographicCameraBundle::new_2d())
@@ -108,8 +113,13 @@ fn setup(mut commands: Commands,
     let mut map = HashMap::new();
     map.insert(GridPos::new(1, 0), c32::new(1./2_f32.sqrt(), 0.));
     map.insert(GridPos::new(2, 0), c32::new(1./2_f32.sqrt(), 0.));
-    measurer::spawn_measurement_device(
+    let m_id = measurer::spawn_measurement_device(
         &mut commands, &asset_server, QState{map});
+
+    // ==== Spawn door ====
+    doors::spawn_door(
+        &mut commands, &asset_server, &mut texture_atlases, GridPos::new(2, 2), m_id);
+
 }
 
 
